@@ -1,0 +1,4 @@
+storeFile=trace-upload.jks
+storePassword=REPLACE_WITH_SECRET
+keyAlias=trace
+keyPassword=REPLACE_WITH_SECRET

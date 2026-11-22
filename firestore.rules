@@ -1,0 +1,180 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(householdId) {
+      return /databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid);
+    }
+
+    function isMember(householdId) {
+      return signedIn()
+        && exists(memberPath(householdId))
+        && get(memberPath(householdId)).data.status == 'active';
+    }
+
+    function isOwner(householdId) {
+      return isMember(householdId)
+        && get(memberPath(householdId)).data.role == 'owner';
+    }
+
+    function validTransaction(householdId) {
+      return request.resource.data.keys().hasOnly([
+          'householdId', 'type', 'amountMinor', 'currency', 'category',
+          'note', 'transactionDate', 'createdBy', 'createdByName',
+          'createdAt', 'updatedAt', 'deletedAt', 'needOrWant',
+          'isRecurring', 'repeatFrequency', 'monthlyType',
+          'numberOfPayments', 'recurrenceStartDate', 'recurrenceEndDate',
+          'recurrenceParentId', 'occurrenceDate'
+        ])
+        && request.resource.data.householdId == householdId
+        && request.resource.data.type in ['income', 'expense']
+        && request.resource.data.amountMinor is int
+        && request.resource.data.amountMinor > 0
+        && request.resource.data.currency is string
+        && request.resource.data.currency.size() == 3
+        && request.resource.data.category is string
+        && request.resource.data.category.size() > 0
+        && request.resource.data.note is string
+        && request.resource.data.transactionDate is timestamp
+        && request.resource.data.createdBy is string
+        && request.resource.data.createdByName is string
+        && (request.resource.data.needOrWant == null
+          || request.resource.data.needOrWant in ['need', 'want'])
+        && request.resource.data.isRecurring is bool
+        && (request.resource.data.repeatFrequency == null
+          || request.resource.data.repeatFrequency in ['monthly', 'weekly'])
+        && (request.resource.data.monthlyType == null
+          || request.resource.data.monthlyType in ['installments', 'ongoing'])
+        && (request.resource.data.numberOfPayments == null
+          || (request.resource.data.numberOfPayments is int
+            && request.resource.data.numberOfPayments >= 1
+            && request.resource.data.numberOfPayments <= 120))
+        && (request.resource.data.recurrenceStartDate == null
+          || request.resource.data.recurrenceStartDate is timestamp)
+        && (request.resource.data.recurrenceEndDate == null
+          || request.resource.data.recurrenceEndDate is timestamp)
+        && (!request.resource.data.isRecurring
+          || (request.resource.data.repeatFrequency != null
+            && request.resource.data.monthlyType != null
+            && request.resource.data.recurrenceStartDate != null));
+    }
+
+    match /users/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow read, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    match /households/{householdId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow read: if isMember(householdId);
+      // Members may adjust the shared monthly budget. The household name and
+      // currency are owner-managed settings.
+      allow update: if isMember(householdId)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'defaultCurrency', 'monthlyBudgetMinor', 'updatedAt'
+        ])
+        && (request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['monthlyBudgetMinor', 'updatedAt'])
+            || isOwner(householdId))
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['defaultCurrency'])
+            || request.resource.data.defaultCurrency in [
+              'INR', 'USD', 'EUR', 'GBP', 'AED', 'AUD', 'BHD', 'BRL',
+              'CAD', 'JPY', 'SAR', 'SGD'
+            ])
+        && (!request.resource.data.keys().hasAny(['monthlyBudgetMinor'])
+          || (request.resource.data.monthlyBudgetMinor is int
+            && request.resource.data.monthlyBudgetMinor > 0));
+      allow delete: if false;
+
+      match /members/{userId} {
+        function invitePath() {
+          return /databases/$(database)/documents/invites/$(request.resource.data.acceptedInviteId);
+        }
+
+        function validOwnerMembership() {
+          return request.auth.uid == userId
+            && request.resource.data.userId == userId
+            && request.resource.data.role == 'owner'
+            && request.resource.data.status == 'active'
+            && getAfter(/databases/$(database)/documents/households/$(householdId)).data.ownerId == userId;
+        }
+
+        function validInvitedMembership() {
+          return request.auth.uid == userId
+            && request.resource.data.userId == userId
+            && request.resource.data.role == 'member'
+            && request.resource.data.status == 'active'
+            && request.resource.data.acceptedInviteId is string
+            && getAfter(invitePath()).data.householdId == householdId
+            && getAfter(invitePath()).data.acceptedBy == userId;
+        }
+
+        allow read: if isMember(householdId);
+        allow create: if signedIn()
+          && (validOwnerMembership() || validInvitedMembership());
+        allow update: if isOwner(householdId)
+          && userId != get(/databases/$(database)/documents/households/$(householdId)).data.ownerId;
+        allow delete: if isOwner(householdId)
+          && userId != get(/databases/$(database)/documents/households/$(householdId)).data.ownerId;
+      }
+
+      match /transactions/{transactionId} {
+        allow read: if isMember(householdId);
+        allow create: if isMember(householdId)
+          && validTransaction(householdId)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isMember(householdId)
+          && validTransaction(householdId)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if false;
+      }
+
+      match /categories/{categoryId} {
+        allow read: if isMember(householdId);
+        allow create, update: if isMember(householdId)
+          && request.resource.data.keys().hasOnly([
+            'name', 'type', 'createdBy', 'createdAt'
+          ])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.type in ['income', 'expense']
+          && request.resource.data.createdBy == request.auth.uid;
+        allow delete: if isMember(householdId)
+          && (resource.data.createdBy == request.auth.uid
+            || isOwner(householdId));
+      }
+    }
+
+    match /invites/{inviteId} {
+      function invitedEmailMatches() {
+        return signedIn()
+          && request.auth.token.email is string
+          && request.auth.token.email.lower() == resource.data.invitedEmail;
+      }
+
+      allow create: if signedIn()
+        && isOwner(request.resource.data.householdId)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.acceptedBy == null;
+      allow get: if isOwner(resource.data.householdId) || invitedEmailMatches();
+      allow list: if false;
+      allow update: if invitedEmailMatches()
+        && resource.data.acceptedBy == null
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['acceptedBy', 'acceptedAt'])
+        && request.resource.data.acceptedBy == request.auth.uid;
+      allow delete: if isOwner(resource.data.householdId);
+    }
+  }
+}
