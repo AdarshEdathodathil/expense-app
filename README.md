@@ -1,32 +1,55 @@
 # Trace
 
-A Flutter household expense tracker designed for two or more people to record
-income and expenses in one shared household.
+Trace is a Flutter expense tracker for households. Members use their own
+accounts to share an income and expense ledger, review spending, and manage
+household settings.
 
-## Current milestone
+## Current status
 
-- Material 3 household dashboard
-- Branded midnight, slate, sage, and gold theme based on the supplied logo
-- Native Android, iOS, and web splash screens plus an animated in-app splash
-- Monthly income, spending, and available balance calculations
-- Recent activity with the member who created each entry
-- Working income/expense form with categories, notes, and dates
-- Currency values stored as integer paise
-- UUIDv7 transaction identifiers for safe offline creation
-- Repository boundary ready for a Firestore implementation
-- Owner/member household service with email-bound invitation codes
-- Realtime Firestore transaction repository for cross-device synchronization
-- Firestore access rules and required composite index
-- Riverpod state management and GoRouter navigation
+The app is implemented as a Firebase-backed Flutter application. Firebase is
+initialized at startup using the platform options in `lib/firebase_options.dart`.
+If initialization or required services fail, Trace shows a setup error screen
+instead of loading the ledger.
 
-The app currently uses `DemoTransactionRepository`, so it runs without cloud
-credentials. Demo data is kept in memory and resets when the app restarts.
+Available app features include:
+
+- Email/password sign-in and household creation or joining with an invitation
+- Shared, realtime Firestore transactions with income and expense categories,
+  dates, notes, and integer-paise currency values
+- Dashboard totals, recent activity, and spending insights
+- Household member and currency settings
+- Recurring expense definitions and a scheduled Cloud Function for generating
+  occurrences
+- CSV/PDF transaction export and share support
+- Light/dark/system themes, onboarding splash, and accessibility coverage
+- Firebase App Check, Analytics, and Crashlytics integration
+
+The repository also includes Firestore security rules and indexes, Flutter
+tests, and Firestore emulator rule tests. Recurring transaction scheduling
+requires deploying the Cloud Function on a Firebase Blaze project. Store
+release preparation remains: configure and verify production Firebase/App Check,
+publish the privacy policy with a real support contact, and configure release
+signing. See [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md) for the checklist.
 
 ## Run locally
+
+Requirements: Flutter/Dart SDK versions compatible with `pubspec.yaml`, plus a
+configured Firebase project for sign-in and shared data.
 
 ```powershell
 flutter pub get
 flutter run
+```
+
+The project is currently associated with Firebase project `expense-tracker-10f12`.
+To use another project, run `flutterfire configure` and update the Firebase CLI
+project selection as needed. Android's native Firebase configuration is
+generated at `android/app/google-services.json` by the FlutterFire setup.
+
+For web App Check, provide the reCAPTCHA v3 key at build time:
+
+```powershell
+flutter run -d chrome --dart-define=TRACE_RECAPTCHA_SITE_KEY=<site-key>
 ```
 
 ## Verification
@@ -37,25 +60,19 @@ flutter test
 flutter build web
 ```
 
-## Connect Firebase
+Run Firestore security rule tests from `emulator_tests/`:
 
-1. Create a Firebase project.
-2. Install and sign in to the Firebase CLI and FlutterFire CLI.
-3. Run `flutterfire configure` from this directory for Android and iOS.
-4. Enable Email/Password authentication and create a Firestore database.
-5. Initialize Firebase from the generated `firebase_options.dart`.
-6. Deploy the included rules and indexes with `firebase deploy --only firestore`.
-7. Connect the authentication and household screens to
-   `FirebaseHouseholdService`, then override `transactionRepositoryProvider`
-   with `FirestoreTransactionRepository` for the active household.
-8. Test with two separate accounts and devices before production release.
+```powershell
+npm install
+npm run test:rules
+```
 
-The backend implementation lives in:
+## Backend and release setup
 
-- `lib/features/households/data/firebase_household_service.dart`
-- `lib/features/transactions/data/firestore_transaction_repository.dart`
-- `firestore.rules`
+Deploy Firestore rules and indexes with `firebase deploy --only firestore`.
+The scheduled recurring expense function is in `functions/`; see its README
+and [PRODUCTION_SETUP.md](PRODUCTION_SETUP.md) before deploying. Production
+release steps also cover App Check enrollment, observability, signing, and
+privacy policy publication.
 
-Do not commit service-account keys or other server credentials. The generated
-mobile Firebase configuration identifies the project; Firestore Security Rules
-and Authentication provide the data-access boundary.
+Do not commit service-account keys, upload keystores, or other server secrets.
