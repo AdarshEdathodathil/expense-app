@@ -76,6 +76,15 @@ void main() {
 
     await tester.tap(find.text('Transactions'));
     await tester.pumpAndSettle();
+    final transactionsTitleFinder = find.byKey(
+      const Key('transactionsPageTitle'),
+    );
+    final transactionsTitle = tester.widget<Text>(transactionsTitleFinder);
+    final transactionsTitleTheme = Theme.of(
+      tester.element(transactionsTitleFinder),
+    ).textTheme.headlineMedium;
+    expect(transactionsTitle.style?.fontSize, transactionsTitleTheme?.fontSize);
+    expect(transactionsTitle.style?.fontWeight, FontWeight.w800);
     expect(find.byKey(const Key('allTransactionsButton')), findsOneWidget);
     expect(find.text('Monthly salary'), findsOneWidget);
     expect(find.text('Weekly groceries'), findsOneWidget);

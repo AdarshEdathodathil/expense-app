@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/core/currency/currency_option.dart';
 import 'package:expense_tracker/features/households/domain/household.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -73,6 +74,19 @@ class FirebaseHouseholdService {
         .map((snapshot) => snapshot.data()?['activeHouseholdId'] as String?);
   }
 
+  Future<void> clearActiveHouseholdIfMatches(String householdId) async {
+    final user = _requireUser();
+    final userRef = _firestore.collection('users').doc(user.uid);
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(userRef);
+      if (snapshot.data()?['activeHouseholdId'] != householdId) return;
+      transaction.update(userRef, {
+        'activeHouseholdId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
   Stream<int> watchMonthlyBudget(String householdId) {
     return _firestore
         .collection('households')
@@ -82,6 +96,31 @@ class FirebaseHouseholdService {
           (snapshot) =>
               snapshot.data()?['monthlyBudgetMinor'] as int? ?? 6000000,
         );
+  }
+
+  Stream<int> watchMonthlyBudgetForMonth({
+    required String householdId,
+    required YearMonth month,
+  }) {
+    return _firestore
+        .collection('households')
+        .doc(householdId)
+        .collection('budgets')
+        .where('month', isLessThanOrEqualTo: month.routeValue)
+        .orderBy('month', descending: true)
+        .limit(1)
+        .snapshots()
+        .asyncMap((snapshot) async {
+          final saved = snapshot.docs.isEmpty
+              ? null
+              : snapshot.docs.first.data()['amountMinor'] as int?;
+          if (saved != null) return saved;
+          final household = await _firestore
+              .collection('households')
+              .doc(householdId)
+              .get();
+          return household.data()?['monthlyBudgetMinor'] as int? ?? 6000000;
+        });
   }
 
   Stream<String> watchDefaultCurrency(String householdId) {
@@ -109,10 +148,19 @@ class FirebaseHouseholdService {
     required int amountMinor,
   }) {
     if (amountMinor <= 0) throw ArgumentError.value(amountMinor);
-    return _firestore.collection('households').doc(householdId).update({
+    final householdRef = _firestore.collection('households').doc(householdId);
+    final month = YearMonth.fromDate(DateTime.now()).routeValue;
+    final batch = _firestore.batch();
+    batch.update(householdRef, {
       'monthlyBudgetMinor': amountMinor,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    batch.set(householdRef.collection('budgets').doc(month), {
+      'month': month,
+      'amountMinor': amountMinor,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return batch.commit();
   }
 
   Future<void> updateDefaultCurrency({
@@ -199,6 +247,12 @@ class FirebaseHouseholdService {
       'status': 'active',
       'joinedAt': FieldValue.serverTimestamp(),
     });
+    final currentMonth = YearMonth.fromDate(DateTime.now()).routeValue;
+    batch.set(householdRef.collection('budgets').doc(currentMonth), {
+      'month': currentMonth,
+      'amountMinor': 6000000,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
     batch.set(userRef, {
       'displayName': displayName,
       'email': user.email?.toLowerCase(),
@@ -242,6 +296,12 @@ class FirebaseHouseholdService {
       'role': 'owner',
       'status': 'active',
       'joinedAt': FieldValue.serverTimestamp(),
+    });
+    final currentMonth = YearMonth.fromDate(DateTime.now()).routeValue;
+    batch.set(householdRef.collection('budgets').doc(currentMonth), {
+      'month': currentMonth,
+      'amountMinor': 6000000,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
     batch.set(userRef, {
       'displayName': displayName.trim(),

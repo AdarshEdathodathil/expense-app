@@ -1,3 +1,4 @@
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/core/theme/app_theme.dart';
 import 'package:expense_tracker/core/settings/app_settings.dart';
 import 'package:expense_tracker/features/auth/presentation/app_gate.dart';
@@ -22,14 +23,34 @@ GoRouter _createRouter(Widget? rootOverride) => GoRouter(
       path: '/',
       builder: (context, state) {
         final tab = state.uri.queryParameters['tab'];
+        final requestedInsightsMonth = YearMonth.tryParse(
+          state.uri.queryParameters['month'],
+        );
+        final currentMonth = YearMonth.fromDate(DateTime.now());
+        final insightsMonth =
+            requestedInsightsMonth != null &&
+                requestedInsightsMonth.compareTo(const YearMonth(2020, 1)) >=
+                    0 &&
+                requestedInsightsMonth.compareTo(currentMonth) <= 0
+            ? requestedInsightsMonth
+            : tab == 'insights'
+            ? currentMonth
+            : null;
         final initialIndex = switch (tab) {
           'insights' => 1,
           'settings' => 2,
           _ => 0,
         };
         final destination = rootOverride is DashboardScreen
-            ? DashboardScreen(initialIndex: initialIndex)
-            : rootOverride ?? AppGate(initialDashboardIndex: initialIndex);
+            ? DashboardScreen(
+                initialIndex: initialIndex,
+                initialInsightsMonth: insightsMonth,
+              )
+            : rootOverride ??
+                  AppGate(
+                    initialDashboardIndex: initialIndex,
+                    initialInsightsMonth: insightsMonth,
+                  );
         return BrandedLaunchScreen(destination: destination);
       },
     ),

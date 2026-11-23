@@ -6,6 +6,10 @@ enum SyncStatus { synced, syncing, offline }
 
 abstract interface class TransactionRepository {
   Stream<List<ExpenseTransaction>> watchAll();
+  Stream<List<ExpenseTransaction>> watchRange({
+    required DateTime startInclusive,
+    required DateTime endExclusive,
+  });
   Stream<SyncStatus> watchSyncStatus();
   Future<void> add(ExpenseTransaction transaction);
   Future<void> update(ExpenseTransaction transaction);
@@ -70,6 +74,23 @@ class DemoTransactionRepository implements TransactionRepository {
   Stream<List<ExpenseTransaction>> watchAll() async* {
     yield _sortedItems();
     yield* _controller.stream;
+  }
+
+  @override
+  Stream<List<ExpenseTransaction>> watchRange({
+    required DateTime startInclusive,
+    required DateTime endExclusive,
+  }) async* {
+    List<ExpenseTransaction> filter(List<ExpenseTransaction> items) => items
+        .where(
+          (item) =>
+              !item.transactionDate.isBefore(startInclusive) &&
+              item.transactionDate.isBefore(endExclusive),
+        )
+        .toList(growable: false);
+
+    yield filter(_sortedItems());
+    yield* _controller.stream.map(filter);
   }
 
   @override

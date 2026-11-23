@@ -35,6 +35,30 @@ class FirestoreTransactionRepository implements TransactionRepository {
   }
 
   @override
+  Stream<List<ExpenseTransaction>> watchRange({
+    required DateTime startInclusive,
+    required DateTime endExclusive,
+  }) {
+    return _transactions
+        .where('deletedAt', isNull: true)
+        .where(
+          'transactionDate',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(startInclusive.toUtc()),
+        )
+        .where(
+          'transactionDate',
+          isLessThan: Timestamp.fromDate(endExclusive.toUtc()),
+        )
+        .orderBy('transactionDate', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) => snapshot.docs
+              .map((document) => _fromFirestore(document.id, document.data()))
+              .toList(growable: false),
+        );
+  }
+
+  @override
   Stream<SyncStatus> watchSyncStatus() {
     return _transactions
         .where('deletedAt', isNull: true)

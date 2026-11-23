@@ -1,3 +1,4 @@
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/features/households/application/household_session.dart';
 import 'package:expense_tracker/features/transactions/data/firestore_transaction_repository.dart';
 import 'package:expense_tracker/features/transactions/data/transaction_repository.dart';
@@ -22,3 +23,13 @@ final transactionsProvider = StreamProvider<List<ExpenseTransaction>>((ref) {
 final syncStatusProvider = StreamProvider<SyncStatus>((ref) {
   return ref.watch(transactionRepositoryProvider).watchSyncStatus();
 });
+
+final insightsTransactionsProvider = StreamProvider.autoDispose
+    .family<List<ExpenseTransaction>, YearMonth>((ref, month) {
+      return ref
+          .watch(transactionRepositoryProvider)
+          .watchRange(
+            startInclusive: month.previous.start,
+            endExclusive: month.endExclusive,
+          );
+    });

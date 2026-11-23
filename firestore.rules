@@ -16,6 +16,12 @@ service cloud.firestore {
         && get(memberPath(householdId)).data.status == 'active';
     }
 
+    function isMemberAfter(householdId) {
+      return signedIn()
+        && existsAfter(memberPath(householdId))
+        && getAfter(memberPath(householdId)).data.status == 'active';
+    }
+
     function isOwner(householdId) {
       return isMember(householdId)
         && get(memberPath(householdId)).data.role == 'owner';
@@ -117,7 +123,11 @@ service cloud.firestore {
             && getAfter(invitePath()).data.acceptedBy == userId;
         }
 
-        allow read: if isMember(householdId);
+        // A removed user may read only their own membership document so the
+        // client can detect the removal and clear its stale household link.
+        allow get: if isMember(householdId)
+          || (signedIn() && request.auth.uid == userId);
+        allow list: if isMember(householdId);
         allow create: if signedIn()
           && (validOwnerMembership() || validInvitedMembership());
         allow update: if isOwner(householdId)
@@ -135,6 +145,20 @@ service cloud.firestore {
           && validTransaction(householdId)
           && request.resource.data.createdBy == resource.data.createdBy
           && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if false;
+      }
+
+      match /budgets/{monthId} {
+        allow read: if isMember(householdId);
+        allow create, update: if (isMember(householdId)
+            || isMemberAfter(householdId))
+          && request.resource.data.keys().hasOnly([
+            'month', 'amountMinor', 'updatedAt'
+          ])
+          && request.resource.data.month == monthId
+          && request.resource.data.amountMinor is int
+          && request.resource.data.amountMinor > 0
+          && request.resource.data.updatedAt is timestamp;
         allow delete: if false;
       }
 

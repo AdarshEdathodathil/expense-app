@@ -1,79 +1,58 @@
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/core/theme/app_theme.dart';
 import 'package:expense_tracker/core/currency/currency_option.dart';
 import 'package:expense_tracker/features/households/application/household_session.dart';
+import 'package:expense_tracker/features/insights/domain/monthly_insights_summary.dart';
 import 'package:expense_tracker/features/transactions/domain/expense_transaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 class InsightsPage extends ConsumerWidget {
-  const InsightsPage({required this.transactions, super.key});
+  const InsightsPage({
+    required this.transactions,
+    this.selectedMonth,
+    this.onMonthChanged,
+    super.key,
+  });
 
   final List<ExpenseTransaction> transactions;
+  final YearMonth? selectedMonth;
+  final ValueChanged<YearMonth>? onMonthChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
-    final monthly = transactions
-        .where(
-          (item) =>
-              item.transactionDate.year == now.year &&
-              item.transactionDate.month == now.month,
-        )
-        .toList();
-    final income = monthly
-        .where((item) => item.type == TransactionType.income)
-        .fold<int>(0, (sum, item) => sum + item.amountMinor);
-    final expenses = monthly
-        .where((item) => item.type == TransactionType.expense)
-        .fold<int>(0, (sum, item) => sum + item.amountMinor);
-    final categoryTotals = <String, int>{};
-    for (final transaction in monthly.where(
-      (item) => item.type == TransactionType.expense,
-    )) {
-      categoryTotals.update(
-        transaction.category,
-        (value) => value + transaction.amountMinor,
-        ifAbsent: () => transaction.amountMinor,
-      );
-    }
-    final categories = categoryTotals.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final expenseItems = monthly
-        .where((item) => item.type == TransactionType.expense)
-        .toList();
-    final previousMonth = DateTime(now.year, now.month - 1);
-    final previousExpenses = transactions
-        .where(
-          (item) =>
-              item.type == TransactionType.expense &&
-              item.transactionDate.year == previousMonth.year &&
-              item.transactionDate.month == previousMonth.month,
-        )
-        .fold<int>(0, (sum, item) => sum + item.amountMinor);
-    final weeklySpending = List<int>.filled(5, 0);
-    final memberSpending = <String, int>{};
-    var needSpending = 0;
-    var wantSpending = 0;
-    for (final item in expenseItems) {
-      weeklySpending[((item.transactionDate.day - 1) ~/ 7).clamp(0, 4)] +=
-          item.amountMinor;
-      memberSpending.update(
-        item.createdByName,
-        (value) => value + item.amountMinor,
-        ifAbsent: () => item.amountMinor,
-      );
-      if (item.priority == TransactionPriority.need) {
-        needSpending += item.amountMinor;
-      }
-      if (item.priority == TransactionPriority.want) {
-        wantSpending += item.amountMinor;
-      }
-    }
+    final month = selectedMonth ?? YearMonth.fromDate(now);
+    final summary = MonthlyInsightsSummary.calculate(
+      transactions: transactions,
+      month: month,
+      now: now,
+    );
+    final monthly = summary.transactions;
+    final income = summary.incomeMinor;
+    final expenses = summary.expenseMinor;
+    final categories = summary.categoryTotals;
+    final expenseItems = summary.expenseItems;
+    final previousMonth = month.previous.start;
+    final previousExpenses = summary.previousExpenseMinor;
+    final weeklySpending = summary.weeklySpending;
+    final memberSpending = summary.memberSpending;
+    final needSpending = summary.needSpendingMinor;
+    final wantSpending = summary.wantSpendingMinor;
     final session = ref.watch(householdSessionProvider);
     final budget = session == null
         ? 6000000
-        : ref.watch(monthlyBudgetProvider(session.householdId)).value ??
+        : summary.isCurrentMonth
+        ? ref.watch(monthlyBudgetProvider(session.householdId)).value ?? 6000000
+        : ref
+                  .watch(
+                    historicalMonthlyBudgetProvider((
+                      householdId: session.householdId,
+                      month: month,
+                    )),
+                  )
+                  .value ??
               6000000;
     final currency = session == null
         ? 'INR'
@@ -83,13 +62,11 @@ class InsightsPage extends ConsumerWidget {
       symbol: currencyOption(currency).symbol,
       decimalDigits: 0,
     );
-    final daysInMonth = DateUtils.getDaysInMonth(now.year, now.month);
+    final daysInMonth = DateUtils.getDaysInMonth(month.year, month.month);
     final daysRemaining = (daysInMonth - now.day + 1).clamp(1, daysInMonth);
     final budgetRemaining = (budget - expenses).clamp(0, budget);
     final dailyAllowance = budgetRemaining ~/ daysRemaining;
-    final projectedMonthEnd = expenses == 0
-        ? 0
-        : ((expenses / now.day) * daysInMonth).round();
+    final projectedMonthEnd = summary.projectedMonthEndMinor;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
@@ -101,9 +78,10 @@ class InsightsPage extends ConsumerWidget {
           ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
-        Text(
-          DateFormat('MMMM yyyy').format(now),
-          style: TextStyle(color: context.traceMuted),
+        _MonthSelector(
+          month: month,
+          currentMonth: YearMonth.fromDate(now),
+          onChanged: onMonthChanged,
         ),
         const SizedBox(height: 22),
         Row(
@@ -142,6 +120,7 @@ class InsightsPage extends ConsumerWidget {
           remainingMinor: budgetRemaining,
           dailyAllowanceMinor: dailyAllowance,
           daysRemaining: daysRemaining,
+          isCurrentMonth: summary.isCurrentMonth,
           money: money,
         ),
         const SizedBox(height: 12),
@@ -188,6 +167,7 @@ class InsightsPage extends ConsumerWidget {
           currentMinor: expenses,
           previousMinor: previousExpenses,
           money: money,
+          currentLabel: DateFormat('MMMM').format(month.start),
           previousLabel: DateFormat('MMMM').format(previousMonth),
         ),
         const SizedBox(height: 16),
@@ -209,6 +189,8 @@ class InsightsPage extends ConsumerWidget {
         _ProjectionCard(
           projectedMinor: projectedMonthEnd,
           budgetMinor: budget,
+          isCurrentMonth: summary.isCurrentMonth,
+          monthLabel: DateFormat('MMMM').format(month.start),
           money: money,
         ),
         const SizedBox(height: 26),
@@ -248,6 +230,183 @@ class InsightsPage extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _MonthSelector extends StatelessWidget {
+  const _MonthSelector({
+    required this.month,
+    required this.currentMonth,
+    required this.onChanged,
+  });
+
+  static const earliestMonth = YearMonth(2020, DateTime.january);
+
+  final YearMonth month;
+  final YearMonth currentMonth;
+  final ValueChanged<YearMonth>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final canGoBack = month.compareTo(earliestMonth) > 0;
+    final canGoForward = month.compareTo(currentMonth) < 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              key: const Key('previousInsightsMonthButton'),
+              tooltip: 'Previous month',
+              onPressed: onChanged != null && canGoBack
+                  ? () => onChanged!(month.previous)
+                  : null,
+              icon: const Icon(Icons.chevron_left_rounded),
+            ),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('insightsMonthPickerButton'),
+                onPressed: onChanged == null
+                    ? null
+                    : () async {
+                        final selected = await showModalBottomSheet<YearMonth>(
+                          context: context,
+                          useSafeArea: true,
+                          showDragHandle: true,
+                          builder: (context) => _MonthPickerSheet(
+                            initialMonth: month,
+                            currentMonth: currentMonth,
+                          ),
+                        );
+                        if (selected != null) onChanged!(selected);
+                      },
+                icon: const Icon(Icons.calendar_month_outlined, size: 19),
+                label: Text(
+                  DateFormat('MMMM yyyy').format(month.start),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            IconButton(
+              key: const Key('nextInsightsMonthButton'),
+              tooltip: 'Next month',
+              onPressed: onChanged != null && canGoForward
+                  ? () => onChanged!(month.next)
+                  : null,
+              icon: const Icon(Icons.chevron_right_rounded),
+            ),
+          ],
+        ),
+        if (month != currentMonth)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 2),
+            child: TextButton.icon(
+              key: const Key('currentInsightsMonthButton'),
+              onPressed: onChanged == null
+                  ? null
+                  : () => onChanged!(currentMonth),
+              icon: const Icon(Icons.today_rounded, size: 17),
+              label: const Text('Back to current month'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MonthPickerSheet extends StatefulWidget {
+  const _MonthPickerSheet({
+    required this.initialMonth,
+    required this.currentMonth,
+  });
+
+  final YearMonth initialMonth;
+  final YearMonth currentMonth;
+
+  @override
+  State<_MonthPickerSheet> createState() => _MonthPickerSheetState();
+}
+
+class _MonthPickerSheetState extends State<_MonthPickerSheet> {
+  late int _year;
+
+  @override
+  void initState() {
+    super.initState();
+    _year = widget.initialMonth.year;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final years = [
+      for (
+        var year = _MonthSelector.earliestMonth.year;
+        year <= widget.currentMonth.year;
+        year++
+      )
+        year,
+    ];
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Choose month',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              ),
+              DropdownButton<int>(
+                value: _year,
+                items: years
+                    .map(
+                      (year) =>
+                          DropdownMenuItem(value: year, child: Text('$year')),
+                    )
+                    .toList(),
+                onChanged: (year) {
+                  if (year != null) setState(() => _year = year);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 2.3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: DateTime.monthsPerYear,
+            itemBuilder: (context, index) {
+              final candidate = YearMonth(_year, index + 1);
+              final enabled = candidate.compareTo(widget.currentMonth) <= 0;
+              final selected = candidate == widget.initialMonth;
+              return FilledButton.tonal(
+                onPressed: enabled
+                    ? () => Navigator.pop(context, candidate)
+                    : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: selected
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : null,
+                ),
+                child: Text(DateFormat.MMM().format(candidate.start)),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -322,6 +481,7 @@ class _BudgetHealthCard extends StatelessWidget {
     required this.remainingMinor,
     required this.dailyAllowanceMinor,
     required this.daysRemaining,
+    required this.isCurrentMonth,
     required this.money,
   });
 
@@ -330,6 +490,7 @@ class _BudgetHealthCard extends StatelessWidget {
   final int remainingMinor;
   final int dailyAllowanceMinor;
   final int daysRemaining;
+  final bool isCurrentMonth;
   final NumberFormat money;
 
   @override
@@ -384,7 +545,9 @@ class _BudgetHealthCard extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            'You can spend about ${money.format(dailyAllowanceMinor / 100)} per day for the next $daysRemaining days.',
+            isCurrentMonth
+                ? 'You can spend about ${money.format(dailyAllowanceMinor / 100)} per day for the next $daysRemaining days.'
+                : 'Recorded spending against the available monthly budget.',
             style: TextStyle(color: context.traceMuted),
           ),
         ],
@@ -398,11 +561,13 @@ class _ComparisonCard extends StatelessWidget {
     required this.currentMinor,
     required this.previousMinor,
     required this.money,
+    required this.currentLabel,
     required this.previousLabel,
   });
   final int currentMinor;
   final int previousMinor;
   final NumberFormat money;
+  final String currentLabel;
   final String previousLabel;
   @override
   Widget build(BuildContext context) {
@@ -432,7 +597,7 @@ class _ComparisonCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '${money.format(currentMinor / 100)} this month • ${money.format(previousMinor / 100)} in $previousLabel',
+            '${money.format(currentMinor / 100)} in $currentLabel • ${money.format(previousMinor / 100)} in $previousLabel',
             style: TextStyle(color: context.traceMuted),
           ),
         ],
@@ -472,6 +637,7 @@ class _TrendCard extends StatelessWidget {
               children: List.generate(5, (index) {
                 final value = values[index];
                 final factor = maxValue == 0 ? 0.08 : value / maxValue;
+                final barHeightFactor = (62 * factor + 5) / 67;
                 return Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -488,11 +654,18 @@ class _TrendCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 5),
-                        Container(
-                          height: 62 * factor + 5,
-                          decoration: BoxDecoration(
-                            color: AppColors.gold,
-                            borderRadius: BorderRadius.circular(8),
+                        Expanded(
+                          child: FractionallySizedBox(
+                            alignment: Alignment.bottomCenter,
+                            heightFactor: barHeightFactor,
+                            child: Container(
+                              key: ValueKey('weekly-spending-bar-$index'),
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: AppColors.gold,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -632,10 +805,14 @@ class _ProjectionCard extends StatelessWidget {
   const _ProjectionCard({
     required this.projectedMinor,
     required this.budgetMinor,
+    required this.isCurrentMonth,
+    required this.monthLabel,
     required this.money,
   });
   final int projectedMinor;
   final int budgetMinor;
+  final bool isCurrentMonth;
+  final String monthLabel;
   final NumberFormat money;
   @override
   Widget build(BuildContext context) {
@@ -644,21 +821,32 @@ class _ProjectionCard extends StatelessWidget {
     return _InsightCard(
       child: Row(
         children: [
-          Icon(Icons.auto_graph_rounded, color: color),
+          Icon(
+            isCurrentMonth
+                ? Icons.auto_graph_rounded
+                : Icons.event_available_rounded,
+            color: color,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Projected month-end spending',
+                Text(
+                  isCurrentMonth
+                      ? 'Projected month-end spending'
+                      : 'Final spending for $monthLabel',
                   style: TextStyle(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  over
-                      ? 'At this pace, you may exceed budget by ${money.format((projectedMinor - budgetMinor) / 100)}.'
-                      : 'At this pace, you are projected to stay within budget.',
+                  isCurrentMonth
+                      ? (over
+                            ? 'At this pace, you may exceed budget by ${money.format((projectedMinor - budgetMinor) / 100)}.'
+                            : 'At this pace, you are projected to stay within budget.')
+                      : (over
+                            ? '${money.format((projectedMinor - budgetMinor) / 100)} over the saved monthly budget.'
+                            : 'Recorded total for the completed month.'),
                   style: TextStyle(color: context.traceMuted),
                 ),
               ],

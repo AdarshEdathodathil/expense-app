@@ -1,3 +1,4 @@
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/core/theme/app_theme.dart';
 import 'package:expense_tracker/core/settings/app_settings.dart';
 import 'package:expense_tracker/core/currency/currency_option.dart';
@@ -5,6 +6,7 @@ import 'package:expense_tracker/core/widgets/trace_bottom_navigation.dart';
 import 'package:expense_tracker/features/households/presentation/household_settings_page.dart';
 import 'package:expense_tracker/features/households/application/household_session.dart';
 import 'package:expense_tracker/features/insights/presentation/insights_page.dart';
+import 'package:expense_tracker/features/insights/application/selected_insights_month.dart';
 import 'package:expense_tracker/features/transactions/application/transaction_providers.dart';
 import 'package:expense_tracker/features/transactions/data/transaction_repository.dart';
 import 'package:expense_tracker/features/transactions/domain/expense_transaction.dart';
@@ -14,9 +16,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
-  const DashboardScreen({this.initialIndex = 0, super.key});
+  const DashboardScreen({
+    this.initialIndex = 0,
+    this.initialInsightsMonth,
+    super.key,
+  });
 
   final int initialIndex;
+  final YearMonth? initialInsightsMonth;
 
   @override
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
@@ -29,6 +36,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex;
+    _scheduleInsightsMonthSync(widget.initialInsightsMonth);
   }
 
   @override
@@ -37,35 +45,65 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (oldWidget.initialIndex != widget.initialIndex) {
       _selectedIndex = widget.initialIndex;
     }
+    if (widget.initialInsightsMonth != null &&
+        widget.initialInsightsMonth != oldWidget.initialInsightsMonth) {
+      _scheduleInsightsMonthSync(widget.initialInsightsMonth);
+    }
+  }
+
+  void _scheduleInsightsMonthSync(YearMonth? month) {
+    if (month == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ref.read(selectedInsightsMonthProvider) == month) return;
+      ref.read(selectedInsightsMonthProvider.notifier).select(month);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final transactions = ref.watch(transactionsProvider);
-    final syncStatus =
-        ref.watch(syncStatusProvider).value ?? SyncStatus.syncing;
+    final insightsMonth = ref.watch(selectedInsightsMonthProvider);
+    final Widget content;
+    if (_selectedIndex == 1) {
+      final transactions = ref.watch(
+        insightsTransactionsProvider(insightsMonth),
+      );
+      content = transactions.when(
+        data: (items) => InsightsPage(
+          transactions: items,
+          selectedMonth: insightsMonth,
+          onMonthChanged: (month) {
+            ref.read(selectedInsightsMonthProvider.notifier).select(month);
+            context.replace('/?tab=insights&month=${month.routeValue}');
+          },
+        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) =>
+            Center(child: Text('Could not load insights: $error')),
+      );
+    } else if (_selectedIndex == 2) {
+      content = const HouseholdSettingsPage();
+    } else {
+      final transactions = ref.watch(transactionsProvider);
+      final syncStatus =
+          ref.watch(syncStatusProvider).value ?? SyncStatus.syncing;
+      content = transactions.when(
+        data: (items) => _DashboardBody(items: items, syncStatus: syncStatus),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) =>
+            Center(child: Text('Could not load data: $error')),
+      );
+    }
 
     return Scaffold(
       extendBody: true,
-      body: SafeArea(
-        child: transactions.when(
-          data: (items) => switch (_selectedIndex) {
-            1 => InsightsPage(transactions: items),
-            2 => const HouseholdSettingsPage(),
-            _ => _DashboardBody(items: items, syncStatus: syncStatus),
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, stack) =>
-              Center(child: Text('Could not load data: $error')),
-        ),
-      ),
+      body: SafeArea(child: content),
       bottomNavigationBar: TraceBottomNavigation(
         selected: switch (_selectedIndex) {
           1 => TraceNavDestination.insights,
           2 => TraceNavDestination.settings,
           _ => TraceNavDestination.home,
         },
-        onHome: () => setState(() => _selectedIndex = 0),
+        onHome: () => context.replace('/'),
         onTransactions: () => context.go('/transactions'),
         onAdd: () async {
           final destination = await context.push<TraceNavDestination>('/add');
@@ -74,17 +112,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             context.go('/transactions');
             return;
           }
-          setState(() {
-            _selectedIndex = switch (destination) {
-              TraceNavDestination.insights => 1,
-              TraceNavDestination.settings => 2,
-              TraceNavDestination.transactions => 0,
-              _ => 0,
-            };
-          });
+          switch (destination) {
+            case TraceNavDestination.insights:
+              final month = ref.read(selectedInsightsMonthProvider);
+              context.replace('/?tab=insights&month=${month.routeValue}');
+            case TraceNavDestination.settings:
+              context.replace('/?tab=settings');
+            case TraceNavDestination.home:
+            case TraceNavDestination.add:
+            case TraceNavDestination.transactions:
+              context.replace('/');
+          }
         },
-        onInsights: () => setState(() => _selectedIndex = 1),
-        onSettings: () => setState(() => _selectedIndex = 2),
+        onInsights: () {
+          final month = ref.read(selectedInsightsMonthProvider);
+          context.replace('/?tab=insights&month=${month.routeValue}');
+        },
+        onSettings: () => context.replace('/?tab=settings'),
       ),
     );
   }
@@ -146,6 +190,7 @@ class _DashboardBodyState extends ConsumerState<_DashboardBody> {
     final alertSettings = ref.watch(appSettingsProvider);
     final budgetExceeded = expenses > displayedBudget;
     final nearingBudget = expenses >= displayedBudget * 0.8;
+    final recentItems = widget.items.take(5).toList(growable: false);
 
     return CustomScrollView(
       slivers: [
@@ -161,13 +206,15 @@ class _DashboardBodyState extends ConsumerState<_DashboardBody> {
                       children: [
                         Text(
                           'TRACE',
-                          style: theme.textTheme.titleLarge?.copyWith(
+                          style: theme.textTheme.headlineLarge?.copyWith(
                             color: context.traceOnSurface,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 3.6,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 36,
+                            height: 1,
+                            letterSpacing: 5,
                           ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 6),
                         Text(
                           'Leave no expense untraced.',
                           style: theme.textTheme.bodySmall?.copyWith(
@@ -321,22 +368,13 @@ class _DashboardBodyState extends ConsumerState<_DashboardBody> {
                 ),
               ],
               const SizedBox(height: 28),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Latest transactions',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => context.go('/transactions'),
-                    child: const Text('See all'),
-                  ),
-                ],
+              Text(
+                'Latest transactions',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 14),
             ],
           ),
         ),
@@ -351,10 +389,29 @@ class _DashboardBodyState extends ConsumerState<_DashboardBody> {
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
             sliver: SliverList.separated(
-              itemCount: widget.items.length,
+              itemCount: recentItems.length + 1,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
-              itemBuilder: (context, index) =>
-                  _TransactionTile(item: widget.items[index]),
+              itemBuilder: (context, index) {
+                if (index < recentItems.length) {
+                  return _TransactionTile(item: recentItems[index]);
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilledButton.icon(
+                    key: const Key('homeSeeAllTransactionsButton'),
+                    onPressed: () => context.go('/transactions'),
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('See all transactions'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
       ],
@@ -741,6 +798,7 @@ class _TransactionTile extends StatelessWidget {
     };
 
     return Card(
+      key: ValueKey('homeTransaction-${item.id}'),
       margin: EdgeInsets.zero,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

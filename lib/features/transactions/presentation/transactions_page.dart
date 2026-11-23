@@ -3,6 +3,7 @@ import 'package:expense_tracker/core/currency/currency_option.dart';
 import 'package:expense_tracker/core/widgets/trace_bottom_navigation.dart';
 import 'package:expense_tracker/features/transactions/application/transaction_providers.dart';
 import 'package:expense_tracker/features/exports/transaction_export_service.dart';
+import 'package:expense_tracker/features/insights/application/selected_insights_month.dart';
 import 'package:expense_tracker/features/transactions/domain/expense_transaction.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,29 +53,38 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
 
     return Scaffold(
       extendBody: true,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Transactions'),
-        actions: [
-          if (transactions.hasValue)
-            PopupMenuButton<String>(
-              tooltip: 'Export transactions',
-              onSelected: (value) => _export(value, transactions.value!),
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'csv', child: Text('Share CSV')),
-                PopupMenuItem(value: 'pdf', child: Text('Share PDF')),
-              ],
-            ),
-          const SizedBox(width: 8),
-        ],
-      ),
       body: SafeArea(
         bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+              padding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Transactions',
+                      key: const Key('transactionsPageTitle'),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  if (transactions.hasValue)
+                    PopupMenuButton<String>(
+                      tooltip: 'Export transactions',
+                      onSelected: (value) =>
+                          _export(value, transactions.value!),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 'csv', child: Text('Share CSV')),
+                        PopupMenuItem(value: 'pdf', child: Text('Share PDF')),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
               child: Row(
                 children: [
                   AnimatedContainer(
@@ -229,7 +239,10 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
         onHome: () => context.go('/'),
         onTransactions: () {},
         onAdd: _openAddPage,
-        onInsights: () => context.go('/?tab=insights'),
+        onInsights: () {
+          final month = ref.read(selectedInsightsMonthProvider);
+          context.go('/?tab=insights&month=${month.routeValue}');
+        },
         onSettings: () => context.go('/?tab=settings'),
       ),
     );
@@ -329,7 +342,8 @@ class _TransactionsPageState extends ConsumerState<TransactionsPage> {
       case TraceNavDestination.home:
         context.go('/');
       case TraceNavDestination.insights:
-        context.go('/?tab=insights');
+        final month = ref.read(selectedInsightsMonthProvider);
+        context.go('/?tab=insights&month=${month.routeValue}');
       case TraceNavDestination.settings:
         context.go('/?tab=settings');
       case TraceNavDestination.transactions:

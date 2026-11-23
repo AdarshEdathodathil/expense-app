@@ -1,3 +1,4 @@
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/features/households/data/firebase_household_service.dart';
 import 'package:expense_tracker/features/households/domain/household.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -54,6 +55,19 @@ final monthlyBudgetProvider = StreamProvider.family<int, String>((
       .watch(firebaseHouseholdServiceProvider)
       .watchMonthlyBudget(householdId);
 });
+
+final historicalMonthlyBudgetProvider =
+    StreamProvider.family<int, ({String householdId, YearMonth month})>((
+      ref,
+      request,
+    ) {
+      return ref
+          .watch(firebaseHouseholdServiceProvider)
+          .watchMonthlyBudgetForMonth(
+            householdId: request.householdId,
+            month: request.month,
+          );
+    });
 
 final defaultCurrencyProvider = StreamProvider.family<String, String>((
   ref,

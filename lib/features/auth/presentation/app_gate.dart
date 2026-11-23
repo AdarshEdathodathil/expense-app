@@ -1,4 +1,5 @@
 import 'package:expense_tracker/core/firebase/firebase_bootstrap.dart';
+import 'package:expense_tracker/core/date/year_month.dart';
 import 'package:expense_tracker/core/theme/app_theme.dart';
 import 'package:expense_tracker/features/auth/presentation/auth_page.dart';
 import 'package:expense_tracker/features/dashboard/presentation/dashboard_screen.dart';
@@ -9,9 +10,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class AppGate extends ConsumerWidget {
-  const AppGate({this.initialDashboardIndex = 0, super.key});
+  const AppGate({
+    this.initialDashboardIndex = 0,
+    this.initialInsightsMonth,
+    super.key,
+  });
 
   final int initialDashboardIndex;
+  final YearMonth? initialInsightsMonth;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,6 +46,7 @@ class AppGate extends ConsumerWidget {
             return _HouseholdGate(
               user: user,
               initialDashboardIndex: initialDashboardIndex,
+              initialInsightsMonth: initialInsightsMonth,
             );
           },
         );
@@ -50,10 +57,12 @@ class _HouseholdGate extends ConsumerWidget {
   const _HouseholdGate({
     required this.user,
     required this.initialDashboardIndex,
+    required this.initialInsightsMonth,
   });
 
   final User user;
   final int initialDashboardIndex;
+  final YearMonth? initialInsightsMonth;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -67,20 +76,62 @@ class _HouseholdGate extends ConsumerWidget {
           ),
           data: (householdId) {
             if (householdId == null) return const HouseholdSetupPage();
+            return _ActiveHouseholdGate(
+              user: user,
+              householdId: householdId,
+              initialDashboardIndex: initialDashboardIndex,
+              initialInsightsMonth: initialInsightsMonth,
+            );
+          },
+        );
+  }
+}
+
+class _ActiveHouseholdGate extends ConsumerWidget {
+  const _ActiveHouseholdGate({
+    required this.user,
+    required this.householdId,
+    required this.initialDashboardIndex,
+    required this.initialInsightsMonth,
+  });
+
+  final User user;
+  final String householdId;
+  final int initialDashboardIndex;
+  final YearMonth? initialInsightsMonth;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ref
+        .watch(
+          currentHouseholdMemberProvider((
+            householdId: householdId,
+            userId: user.uid,
+          )),
+        )
+        .when(
+          loading: () =>
+              const _LoadingPage(message: 'Confirming your membership…'),
+          error: (error, stack) => _ErrorPage(
+            message: 'Could not confirm your household membership.',
+            details: error.toString(),
+          ),
+          data: (member) {
+            if (member == null) {
+              return _RemovedHouseholdRecovery(householdId: householdId);
+            }
 
             final session = ref.watch(householdSessionProvider);
             if (session?.householdId != householdId ||
-                session?.userId != user.uid) {
+                session?.userId != user.uid ||
+                session?.displayName != member.displayName) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 ref
                     .read(householdSessionProvider.notifier)
                     .activate(
                       HouseholdSession(
                         userId: user.uid,
-                        displayName:
-                            user.displayName ??
-                            user.email?.split('@').first ??
-                            'You',
+                        displayName: member.displayName,
                         householdId: householdId,
                       ),
                     );
@@ -88,9 +139,57 @@ class _HouseholdGate extends ConsumerWidget {
               return const _LoadingPage(message: 'Opening Trace…');
             }
 
-            return DashboardScreen(initialIndex: initialDashboardIndex);
+            return DashboardScreen(
+              initialIndex: initialDashboardIndex,
+              initialInsightsMonth: initialInsightsMonth,
+            );
           },
         );
+  }
+}
+
+class _RemovedHouseholdRecovery extends ConsumerStatefulWidget {
+  const _RemovedHouseholdRecovery({required this.householdId});
+
+  final String householdId;
+
+  @override
+  ConsumerState<_RemovedHouseholdRecovery> createState() =>
+      _RemovedHouseholdRecoveryState();
+}
+
+class _RemovedHouseholdRecoveryState
+    extends ConsumerState<_RemovedHouseholdRecovery> {
+  late Future<void> _recovery;
+
+  @override
+  void initState() {
+    super.initState();
+    _recovery = _recover();
+  }
+
+  Future<void> _recover() async {
+    ref.read(householdSessionProvider.notifier).clear();
+    await ref
+        .read(firebaseHouseholdServiceProvider)
+        .clearActiveHouseholdIfMatches(widget.householdId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _recovery,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _ErrorPage(
+            message: 'Your household access was removed.',
+            details: 'Could not refresh your account: ${snapshot.error}',
+            onRetry: () => setState(() => _recovery = _recover()),
+          );
+        }
+        return const _LoadingPage(message: 'Refreshing your account…');
+      },
+    );
   }
 }
 
@@ -171,10 +270,15 @@ class _LoadingPage extends StatelessWidget {
 }
 
 class _ErrorPage extends StatelessWidget {
-  const _ErrorPage({required this.message, required this.details});
+  const _ErrorPage({
+    required this.message,
+    required this.details,
+    this.onRetry,
+  });
 
   final String message;
   final String details;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -197,6 +301,14 @@ class _ErrorPage extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: context.traceMuted),
             ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Try again'),
+              ),
+            ],
           ],
         ),
       ),

@@ -27,7 +27,9 @@ async function run() {
 
   const owner = env.authenticatedContext('owner').firestore();
   const member = env.authenticatedContext('member').firestore();
+  const removed = env.authenticatedContext('removed').firestore();
   const outsider = env.authenticatedContext('outsider').firestore();
+  const creator = env.authenticatedContext('creator').firestore();
   const transaction = {
     householdId: 'h1', type: 'expense', amountMinor: 1000, currency: 'INR',
     category: 'Groceries', note: 'Test', createdBy: 'member', createdByName: 'Member',
@@ -42,6 +44,25 @@ async function run() {
   await assertSucceeds(owner.doc('households/h1/transactions/t1').update({deletedAt: new Date()}));
   await assertFails(outsider.doc('households/h1/transactions/t2').set(transaction));
   await assertFails(outsider.doc('households/h1').get());
+  await assertSucceeds(removed.doc('households/h1/members/removed').get());
+  await assertFails(removed.doc('households/h1/members/member').get());
+  await assertFails(removed.doc('households/h1').get());
+  await assertSucceeds(member.doc('households/h1/budgets/2026-11').set({
+    month: '2026-11', amountMinor: 5000000, updatedAt: Timestamp.now(),
+  }));
+  await assertFails(outsider.doc('households/h1/budgets/2026-11').get());
+  await assertFails(member.doc('households/h1/budgets/2026-10').set({
+    month: 'wrong-month', amountMinor: 5000000, updatedAt: Timestamp.now(),
+  }));
+  const setupBatch = creator.batch();
+  setupBatch.set(creator.doc('households/h2'), {ownerId: 'creator'});
+  setupBatch.set(creator.doc('households/h2/members/creator'), {
+    userId: 'creator', role: 'owner', status: 'active',
+  });
+  setupBatch.set(creator.doc('households/h2/budgets/2026-11'), {
+    month: '2026-11', amountMinor: 6000000, updatedAt: Timestamp.now(),
+  });
+  await assertSucceeds(setupBatch.commit());
   console.log('Firestore security rules passed.');
 }
 
