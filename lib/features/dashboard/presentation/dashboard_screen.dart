@@ -95,8 +95,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
 
     return Scaffold(
+      // Let every dashboard tab continue behind the inset navigation bar.
+      // Each scrollable tab supplies its own trailing padding so its final
+      // control can still be brought fully above the bar.
       extendBody: true,
-      body: SafeArea(child: content),
+      body: SafeArea(
+        key: const Key('dashboardBodySafeArea'),
+        bottom: false,
+        child: content,
+      ),
       bottomNavigationBar: TraceBottomNavigation(
         selected: switch (_selectedIndex) {
           1 => TraceNavDestination.insights,
@@ -380,14 +387,14 @@ class _DashboardBodyState extends ConsumerState<_DashboardBody> {
         ),
         if (widget.items.isEmpty)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 110),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
             sliver: SliverToBoxAdapter(
               child: _EmptyRecentActivity(onAdd: () => context.push('/add')),
             ),
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 110),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 120),
             sliver: SliverList.separated(
               itemCount: recentItems.length + 1,
               separatorBuilder: (_, _) => const SizedBox(height: 10),

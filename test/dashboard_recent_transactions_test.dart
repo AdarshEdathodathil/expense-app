@@ -46,8 +46,17 @@ void main() {
           child: const ExpenseTrackerApp(rootOverride: DashboardScreen()),
         ),
       );
-    await tester.pump(const Duration(milliseconds: 1500));
+      await tester.pump(const Duration(milliseconds: 1500));
       await tester.pumpAndSettle();
+
+      expect(tester.widget<Scaffold>(find.byType(Scaffold)).extendBody, isTrue);
+      expect(
+        tester
+            .widget<SafeArea>(find.byKey(const Key('dashboardBodySafeArea')))
+            .bottom,
+        isFalse,
+      );
+      expect(find.byKey(const Key('bottomNavigationBackdrop')), findsOneWidget);
 
       final transactionTiles = find.byWidgetPredicate(
         (widget) =>

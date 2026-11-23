@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:expense_tracker/core/theme/app_theme.dart';
 import 'package:flutter/material.dart';
 
@@ -27,18 +29,9 @@ class TraceBottomNavigation extends StatelessWidget {
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-      child: Container(
-        height: 76,
+      child: DecoratedBox(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: isDark
-                ? const [Color(0xF71B2632), Color(0xF724303D)]
-                : const [Color(0xFFFEFDFC), Color(0xFFF7F4ED)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: context.traceNavBorder),
           boxShadow: [
             BoxShadow(
               color: isDark ? const Color(0x660A1017) : const Color(0x22000000),
@@ -47,45 +40,66 @@ class TraceBottomNavigation extends StatelessWidget {
             ),
           ],
         ),
-        child: Row(
-          children: [
-            _NavItem(
-              label: 'Home',
-              icon: Icons.home_outlined,
-              selectedIcon: Icons.home_rounded,
-              selected: selected == TraceNavDestination.home,
-              onTap: onHome,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            key: const Key('bottomNavigationBackdrop'),
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              height: 76,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? const [Color(0xD91B2632), Color(0xD924303D)]
+                      : const [Color(0xCCFEFDFC), Color(0xCCF7F4ED)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: context.traceNavBorder),
+              ),
+              child: Row(
+                children: [
+                  _NavItem(
+                    label: 'Home',
+                    icon: Icons.home_outlined,
+                    selectedIcon: Icons.home_rounded,
+                    selected: selected == TraceNavDestination.home,
+                    onTap: onHome,
+                  ),
+                  _NavItem(
+                    label: 'Transactions',
+                    icon: Icons.receipt_long_outlined,
+                    selectedIcon: Icons.receipt_long_rounded,
+                    selected: selected == TraceNavDestination.transactions,
+                    onTap: onTransactions,
+                  ),
+                  _NavItem(
+                    key: const Key('addTransactionButton'),
+                    label: 'Add',
+                    icon: Icons.add_circle_outline_rounded,
+                    selectedIcon: Icons.add_circle_rounded,
+                    selected: selected == TraceNavDestination.add,
+                    onTap: onAdd,
+                  ),
+                  _NavItem(
+                    label: 'Insights',
+                    icon: Icons.auto_graph_outlined,
+                    selectedIcon: Icons.auto_graph_rounded,
+                    selected: selected == TraceNavDestination.insights,
+                    onTap: onInsights,
+                  ),
+                  _NavItem(
+                    label: 'Settings',
+                    icon: Icons.tune_outlined,
+                    selectedIcon: Icons.tune_rounded,
+                    selected: selected == TraceNavDestination.settings,
+                    onTap: onSettings,
+                  ),
+                ],
+              ),
             ),
-            _NavItem(
-              label: 'Transactions',
-              icon: Icons.receipt_long_outlined,
-              selectedIcon: Icons.receipt_long_rounded,
-              selected: selected == TraceNavDestination.transactions,
-              onTap: onTransactions,
-            ),
-            _NavItem(
-              key: const Key('addTransactionButton'),
-              label: 'Add',
-              icon: Icons.add_circle_outline_rounded,
-              selectedIcon: Icons.add_circle_rounded,
-              selected: selected == TraceNavDestination.add,
-              onTap: onAdd,
-            ),
-            _NavItem(
-              label: 'Insights',
-              icon: Icons.auto_graph_outlined,
-              selectedIcon: Icons.auto_graph_rounded,
-              selected: selected == TraceNavDestination.insights,
-              onTap: onInsights,
-            ),
-            _NavItem(
-              label: 'Settings',
-              icon: Icons.tune_outlined,
-              selectedIcon: Icons.tune_rounded,
-              selected: selected == TraceNavDestination.settings,
-              onTap: onSettings,
-            ),
-          ],
+          ),
         ),
       ),
     );
